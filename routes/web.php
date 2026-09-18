@@ -10,7 +10,26 @@ use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PaymentCallbackController;
 use App\Http\Controllers\ProductController;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
+
+// ==================== CRON TRIGGER (EXTERNAL) ====================
+Route::get('/cron/expire-orders/{token}', function ($token) {
+    if ($token !== config('app.cron_token')) {
+        abort(403);
+    }
+
+    Artisan::call('orders:expire');
+    $output = Artisan::output();
+
+    Log::info('Cron expire-orders triggered', [
+        'output' => trim($output),
+        'ip' => request()->ip(),
+    ]);
+
+    return response(trim($output));
+})->middleware('throttle:10,1');
 
 // ==================== PAYMENT WEBHOOK ====================
 Route::post('/payment/duitku-callback', [PaymentCallbackController::class, 'handle'])
