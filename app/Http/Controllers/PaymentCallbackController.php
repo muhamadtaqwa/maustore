@@ -23,10 +23,10 @@ class PaymentCallbackController extends Controller
             $reference = $request->reference;
             $resultCode = $request->resultCode;
 
-            // 1. Validasi Signature
+            // 1. Validasi Signature — pake hash_equals (constant-time)
             $calcSignature = md5($merchantCode . $amount . $merchantOrderId . $apiKey);
 
-            if ($signature !== $calcSignature) {
+            if (!hash_equals($calcSignature, (string) $signature)) {
                 Log::warning('Duitku Callback Invalid Signature', [
                     'ip' => $request->ip(),
                     'merchantOrderId' => $merchantOrderId,
@@ -45,7 +45,7 @@ class PaymentCallbackController extends Controller
                 return response()->json(['success' => false, 'message' => 'Order not found'], 404);
             }
 
-            // 3. Validasi Amount ← FIX INI
+            // 3. Validasi Amount
             if ((int) $order->total_amount !== (int) $amount) {
                 Log::error('Duitku Callback Amount Mismatch', [
                     'invoice' => $merchantOrderId,
