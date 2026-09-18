@@ -36,7 +36,7 @@ export default function Check() {
                         </label>
                         <input
                             type="text"
-                            placeholder="INV-20260918-A7K9M2"
+                            placeholder="INV-20260918-XXXXXX"
                             value={data.invoice_number}
                             onChange={(e) =>
                                 setData(

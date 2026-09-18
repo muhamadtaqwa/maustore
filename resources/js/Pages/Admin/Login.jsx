@@ -37,7 +37,7 @@ export default function Login() {
                             </label>
                             <input
                                 type="email"
-                                placeholder="admin@maustore.test"
+                                placeholder="example@gmail.com"
                                 value={data.email}
                                 onChange={(e) =>
                                     setData("email", e.target.value)
@@ -104,7 +104,7 @@ export default function Login() {
                             href="/"
                             className="text-xs text-gray-500 hover:text-blue-600 transition"
                         >
-                            Kembali ke toko
+                            Kembali ke Toko
                         </a>
                     </div>
                 </div>
