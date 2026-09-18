@@ -23,27 +23,49 @@ class PaymentCallbackController extends Controller
             $reference = $request->reference;
             $resultCode = $request->resultCode;
 
-            // Validasi Signature (MD5(merchantCode + amount + merchantOrderId + apiKey))
+            // 1. Validasi Signature
             $calcSignature = md5($merchantCode . $amount . $merchantOrderId . $apiKey);
 
             if ($signature !== $calcSignature) {
-                Log::warning('Duitku Callback Invalid Signature', $request->all());
+                Log::warning('Duitku Callback Invalid Signature', [
+                    'ip' => $request->ip(),
+                    'merchantOrderId' => $merchantOrderId,
+                ]);
                 return response()->json(['success' => false, 'message' => 'Invalid signature'], 400);
             }
 
-            // Cari pesanan
+            // 2. Cari pesanan
             $order = Order::where('invoice_number', $merchantOrderId)->first();
 
             if (!$order) {
+                Log::warning('Duitku Callback Order Not Found', [
+                    'ip' => $request->ip(),
+                    'merchantOrderId' => $merchantOrderId,
+                ]);
                 return response()->json(['success' => false, 'message' => 'Order not found'], 404);
             }
 
-            // Idempotency: kalau udah paid/delivered, abaikan
+            // 3. Validasi Amount ← FIX INI
+            if ((int) $order->total_amount !== (int) $amount) {
+                Log::error('Duitku Callback Amount Mismatch', [
+                    'invoice' => $merchantOrderId,
+                    'expected' => $order->total_amount,
+                    'received' => $amount,
+                    'ip' => $request->ip(),
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Amount mismatch',
+                ], 400);
+            }
+
+            // 4. Idempotency
             if (in_array($order->status, ['paid', 'delivered'])) {
                 return response()->json(['success' => true, 'message' => 'Order already processed']);
             }
 
-            // Kalau pembayaran sukses (00)
+            // 5. Update status
             if ($resultCode === '00') {
                 $order->update([
                     'status' => 'paid',
@@ -51,8 +73,17 @@ class PaymentCallbackController extends Controller
                     'payment_method' => 'qris',
                     'payment_reference' => $reference,
                 ]);
+
+                Log::info('Duitku Order Paid', [
+                    'invoice' => $merchantOrderId,
+                    'amount' => $amount,
+                ]);
             } elseif ($resultCode === '01') {
                 $order->update(['status' => 'failed']);
+
+                Log::info('Duitku Order Failed', [
+                    'invoice' => $merchantOrderId,
+                ]);
             }
 
             return response()->json(['success' => true, 'message' => 'Callback processed']);

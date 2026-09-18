@@ -33,6 +33,7 @@ Route::get('/cron/expire-orders/{token}', function ($token) {
 
 // ==================== PAYMENT WEBHOOK ====================
 Route::post('/payment/duitku-callback', [PaymentCallbackController::class, 'handle'])
+    ->middleware('throttle:30,1')
     ->name('payment.callback');
 
 // ==================== STOREFRONT ====================
