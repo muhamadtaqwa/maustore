@@ -43,7 +43,9 @@ Route::get('/produk/{slug}', [ProductController::class, 'show'])->name('products
 
 // ==================== CHECKOUT ====================
 Route::get('/checkout/{slug}', [CheckoutController::class, 'show'])->name('checkout.show');
-Route::post('/checkout', [CheckoutController::class, 'store'])->name('checkout.store');
+Route::post('/checkout', [CheckoutController::class, 'store'])
+    ->middleware('throttle:10,1')
+    ->name('checkout.store');
 Route::get('/checkout/{invoice}/payment', [CheckoutController::class, 'payment'])->name('checkout.payment');
 Route::get('/checkout/{invoice}/status', [CheckoutController::class, 'status'])->name('checkout.status');
 Route::post('/checkout/{invoice}/upload-proof', [CheckoutController::class, 'uploadProof'])->name('checkout.upload-proof');
@@ -57,7 +59,9 @@ Route::get('/cek-pesanan/{invoice}', [OrderController::class, 'detail'])->name('
 
 // ==================== AUTH ADMIN ====================
 Route::get('/dashboard/login', [AuthController::class, 'showLogin'])->name('admin.login');
-Route::post('/dashboard/login', [AuthController::class, 'login'])->name('admin.login.submit');
+Route::post('/dashboard/login', [AuthController::class, 'login'])
+    ->middleware('throttle:5,1')
+    ->name('admin.login.submit');
 Route::post('/dashboard/logout', [AuthController::class, 'logout'])->name('admin.logout');
 
 // ==================== ADMIN (PROTECTED) ====================
