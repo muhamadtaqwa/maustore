@@ -16,9 +16,9 @@ use Inertia\Response;
 
 class CheckoutController extends Controller
 {
-    protected DuitkuService $duitku;
+    protected ?DuitkuService $duitku;
 
-    public function __construct(DuitkuService $duitku)
+    public function __construct(?DuitkuService $duitku = null)
     {
         $this->duitku = $duitku;
     }
@@ -76,19 +76,27 @@ class CheckoutController extends Controller
             return back()->withErrors(['variant_id' => 'Stok varian habis.']);
         }
 
-        // Bikin Order
+        // Bikin Order dengan metode QRIS Statis
         $order = DB::transaction(function () use ($validated, $product, $variant) {
             $customer = Customer::firstOrCreate(
                 ['phone' => $validated['phone']],
                 ['email' => null]
             );
 
+            // Generate kode unik (100 - 999) agar mutasi mudah dicek
+            $useUniqueCode = config('qris.enable_unique_code', true);
+            $uniqueCode = $useUniqueCode ? rand(100, 999) : 0;
+            $totalAmount = (float) $variant->price + $uniqueCode;
+            $expiryMinutes = config('qris.expiry_minutes', 60);
+
             $order = Order::create([
                 'invoice_number' => $this->generateInvoiceNumber(),
                 'customer_id' => $customer->id,
                 'status' => 'pending',
-                'total_amount' => $variant->price,
-                'expired_at' => now()->addMinutes(config('services.duitku.expiry_minutes', 30)),
+                'unique_code' => $uniqueCode,
+                'total_amount' => $totalAmount,
+                'payment_method' => 'qris_manual',
+                'expired_at' => now()->addMinutes($expiryMinutes),
             ]);
 
             OrderItem::create([
@@ -108,31 +116,11 @@ class CheckoutController extends Controller
             return $order;
         });
 
-        // Panggil Duitku
-        try {
-            $order->load(['customer', 'items']);
-            $duitkuResponse = $this->duitku->createQrisTransaction($order);
-
-            $order->update([
-                'payment_method' => 'qris',
-                'payment_reference' => $duitkuResponse['reference'],
-                'duitku_reference' => $duitkuResponse['reference'],
-                'qr_string' => $duitkuResponse['qr_string'],
-            ]);
-
-            Log::info('Duitku QRIS created', [
-                'order' => $order->invoice_number,
-                'reference' => $duitkuResponse['reference'],
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Duitku error saat checkout', [
-                'order' => $order->invoice_number,
-                'error' => $e->getMessage(),
-            ]);
-
-            return redirect()->route('checkout.payment', ['invoice' => $order->invoice_number])
-                ->withErrors(['duitku' => 'Gagal membuat QRIS: ' . $e->getMessage()]);
-        }
+        Log::info('Order QRIS Statis dibuat', [
+            'invoice' => $order->invoice_number,
+            'total' => $order->total_amount,
+            'unique_code' => $order->unique_code,
+        ]);
 
         return redirect()->route('checkout.payment', ['invoice' => $order->invoice_number]);
     }
@@ -144,14 +132,47 @@ class CheckoutController extends Controller
             ->with(['customer', 'items.product'])
             ->firstOrFail();
 
+        // Cari gambar QRIS: cek apakah public/images/qris.png / jpg / svg ada
+        $configuredPath = config('qris.image_path', '/images/qris.png');
+        $cleanPath = ltrim($configuredPath, '/');
+        $qrisImageUrl = asset($configuredPath);
+
+        if (!file_exists(public_path($cleanPath))) {
+            if (file_exists(public_path('images/qris-placeholder.svg'))) {
+                $qrisImageUrl = asset('images/qris-placeholder.svg');
+            }
+        }
+
+        $merchantName = config('qris.merchant_name', 'MauStore');
+        $whatsappNumber = config('qris.whatsapp_number', '6281234567890');
+        
+        // Bersihkan nomor WhatsApp (hanya angka, pastikan format 62xxx)
+        $cleanWaNumber = preg_replace('/[^0-9]/', '', $whatsappNumber);
+        if (str_starts_with($cleanWaNumber, '08')) {
+            $cleanWaNumber = '628' . substr($cleanWaNumber, 2);
+        }
+
+        $firstItem = $order->items->first();
+        $productText = $firstItem ? "{$firstItem->product_name} ({$firstItem->variant_name})" : "Produk MauStore";
+        $totalFormatted = 'Rp ' . number_format($order->total_amount, 0, ',', '.');
+
+        $waMessage = "Halo {$merchantName}, saya sudah melakukan pembayaran pesanan:\n\n"
+            . "• No Invoice: {$order->invoice_number}\n"
+            . "• Produk: {$productText}\n"
+            . "• Total Bayar: {$totalFormatted}\n"
+            . "• No HP: {$order->customer->phone}\n\n"
+            . "Berikut saya lampirkan bukti pembayarannya, mohon segera diproses ya min. Terima kasih!";
+
+        $whatsappUrl = "https://wa.me/{$cleanWaNumber}?text=" . rawurlencode($waMessage);
+
         return Inertia::render('Checkout/Payment', [
             'order' => [
                 'id' => $order->id,
                 'invoice_number' => $order->invoice_number,
                 'total_amount' => (float) $order->total_amount,
+                'unique_code' => (int) ($order->unique_code ?? 0),
                 'status' => $order->status,
-                'qr_string' => $order->qr_string,
-                'payment_reference' => $order->payment_reference,
+                'payment_proof' => $order->payment_proof ? asset('storage/' . $order->payment_proof) : null,
                 'expired_at' => $order->expired_at?->toIso8601String(),
                 'paid_at' => $order->paid_at?->format('d M Y H:i'),
                 'created_at' => $order->created_at->format('d M Y H:i'),
@@ -167,6 +188,12 @@ class CheckoutController extends Controller
                     'subtotal' => (float) $item->subtotal,
                 ]),
             ],
+            'qris' => [
+                'image_url' => $qrisImageUrl,
+                'merchant_name' => $merchantName,
+                'whatsapp_url' => $whatsappUrl,
+                'whatsapp_number' => $cleanWaNumber,
+            ],
         ]);
     }
 
@@ -174,7 +201,8 @@ class CheckoutController extends Controller
     {
         $order = Order::where('invoice_number', $invoice)->firstOrFail();
 
-        if ($order->status === 'pending' && $order->duitku_reference) {
+        // Optional Duitku check fallback jika ada data lama
+        if ($order->status === 'pending' && $order->duitku_reference && $this->duitku) {
             try {
                 $duitkuStatus = $this->duitku->checkTransaction($order->invoice_number);
 
@@ -185,14 +213,11 @@ class CheckoutController extends Controller
                     ]);
                 }
             } catch (\Exception $e) {
-                Log::warning('Gagal cek status Duitku', [
-                    'order' => $invoice,
-                    'error' => $e->getMessage(),
-                ]);
+                // ignore
             }
         }
 
-        // Kirim delivery_content kalau udah paid
+        // Kirim delivery_content kalau udah paid atau delivered
         $items = [];
         if (in_array($order->status, ['paid', 'delivered'])) {
             $order->load('items');
@@ -205,6 +230,7 @@ class CheckoutController extends Controller
 
         return response()->json([
             'status' => $order->status,
+            'payment_proof' => $order->payment_proof ? asset('storage/' . $order->payment_proof) : null,
             'paid_at' => $order->paid_at?->toIso8601String(),
             'items' => $items,
         ]);
@@ -212,14 +238,19 @@ class CheckoutController extends Controller
 
     public function uploadProof(Request $request, string $invoice)
     {
-        $validated = $request->validate([
-            'payment_proof' => 'required|image|max:2048',
+        $request->validate([
+            'payment_proof' => 'required|image|mimes:jpeg,png,jpg,webp|max:4096',
+        ], [
+            'payment_proof.required' => 'Silakan pilih foto atau screenshot bukti pembayaran.',
+            'payment_proof.image' => 'File harus berupa gambar.',
+            'payment_proof.mimes' => 'Format file gambar harus jpg, jpeg, png, atau webp.',
+            'payment_proof.max' => 'Ukuran gambar maksimal 4 MB.',
         ]);
 
         $order = Order::where('invoice_number', $invoice)->firstOrFail();
 
         if ($order->status !== 'pending') {
-            return back()->withErrors(['payment_proof' => 'Order sudah diproses.']);
+            return back()->withErrors(['payment_proof' => 'Pesanan ini sudah tidak dalam status pending.']);
         }
 
         $path = $request->file('payment_proof')->store('payment-proofs', 'public');
@@ -229,7 +260,7 @@ class CheckoutController extends Controller
         ]);
 
         return redirect()->route('checkout.payment', ['invoice' => $invoice])
-            ->with('success', 'Bukti pembayaran berhasil diupload. Menunggu verifikasi admin.');
+            ->with('success', 'Bukti pembayaran berhasil diupload! Admin akan segera memverifikasi pesanan Anda.');
     }
 
     private function generateInvoiceNumber(): string

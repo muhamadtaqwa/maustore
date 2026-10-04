@@ -15,6 +15,7 @@ class ExpireOrders extends Command
     {
         $expired = Order::query()
             ->where('status', 'pending')
+            ->whereNull('payment_proof') // Jangan expire order yang sudah diunggah buktinya
             ->whereNotNull('expired_at')
             ->where('expired_at', '<', now())
             ->with('items')

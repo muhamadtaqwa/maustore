@@ -176,6 +176,11 @@ export default function Index({ orders, stats, filters }) {
                                             >
                                                 {statusLabels[order.status]}
                                             </span>
+                                            {order.has_payment_proof && order.status === "pending" && (
+                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-semibold">
+                                                    Bukti Terunggah
+                                                </span>
+                                            )}
                                         </div>
                                         <p className="text-xs text-gray-500 mt-1">
                                             {order.customer.phone} •{" "}
