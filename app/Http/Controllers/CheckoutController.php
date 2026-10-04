@@ -144,7 +144,7 @@ class CheckoutController extends Controller
         }
 
         $merchantName = config('qris.merchant_name', 'MauStore');
-        $whatsappNumber = config('qris.whatsapp_number', '6281234567890');
+        $whatsappNumber = config('qris.whatsapp_number', '6285952418477');
         
         // Bersihkan nomor WhatsApp (hanya angka, pastikan format 62xxx)
         $cleanWaNumber = preg_replace('/[^0-9]/', '', $whatsappNumber);

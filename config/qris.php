@@ -19,7 +19,7 @@ return [
     'merchant_name' => env('QRIS_MERCHANT_NAME', env('APP_NAME', 'MauStore')),
 
     // Nomor WhatsApp admin untuk konfirmasi pembayaran (format 628xxx)
-    'whatsapp_number' => env('STORE_WHATSAPP_NUMBER', '6281234567890'),
+    'whatsapp_number' => env('STORE_WHATSAPP_NUMBER', '6285952418477'),
 
     // Masa berlaku pesanan sebelum otomatis kadaluarsa (dalam menit)
     'expiry_minutes' => (int) env('QRIS_EXPIRY_MINUTES', 60),
